@@ -82,6 +82,17 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            user_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            revoked_at TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -121,6 +132,22 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         raise HTTPException(status_code=401, detail="User not found")
 
     return dict(user)
+
+def get_api_key(api_key: str = Depends(HTTPBearer())):
+    if not api_key:
+        raise HTTPException(status_code=401, detail="API key required")
+
+    conn = get_db()
+    key_record = conn.execute(
+        "SELECT * FROM api_keys WHERE key = ? AND revoked_at IS NULL",
+        (api_key.credentials,)
+    ).fetchone()
+    conn.close()
+
+    if key_record is None:
+        raise HTTPException(status_code=401, detail="Invalid or revoked API key")
+
+    return dict(key_record)
 
 # ---- Pydantic Models ----
 class UserSignup(BaseModel):
@@ -167,7 +194,7 @@ def columns():
     return {"columns": train_columns}
 
 @app.post("/predict")
-def predict(payload: RawRow):
+def predict(payload: RawRow, api_key: dict = Depends(get_api_key)):
     # ---- Dummy output for hard proof ----
     if TEST_MODE:
         return {
@@ -283,6 +310,75 @@ def get_me(current_user: dict = Depends(get_current_user)):
 def logout():
     # In a stateless JWT system, logout is handled client-side by removing the token
     return {"message": "Logged out successfully"}
+
+# ---- API Key Management Endpoints ----
+
+class CreateApiKey(BaseModel):
+    name: str
+
+@app.post("/api-keys", response_model=dict)
+def create_api_key(request: CreateApiKey, current_user: dict = Depends(get_current_user)):
+    import secrets
+    api_key = secrets.token_urlsafe(32)
+
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO api_keys (key, name, user_id) VALUES (?, ?, ?)",
+            (api_key, request.name, current_user["id"])
+        )
+        conn.commit()
+        key_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to create API key: {str(e)}")
+    finally:
+        conn.close()
+
+    return {
+        "id": key_id,
+        "key": api_key,
+        "name": request.name,
+        "created_at": datetime.utcnow().isoformat(),
+        "message": "API key created successfully. Store this key securely - it won't be shown again."
+    }
+
+@app.get("/api-keys")
+def list_api_keys(current_user: dict = Depends(get_current_user)):
+    conn = get_db()
+    keys = conn.execute(
+        "SELECT id, name, created_at, revoked_at FROM api_keys WHERE user_id = ? ORDER BY created_at DESC",
+        (current_user["id"],)
+    ).fetchall()
+    conn.close()
+
+    return {"api_keys": [dict(key) for key in keys]}
+
+@app.delete("/api-keys/{key_id}")
+def revoke_api_key(key_id: int, current_user: dict = Depends(get_current_user)):
+    conn = get_db()
+    try:
+        # Check if the key belongs to the user
+        key_record = conn.execute(
+            "SELECT id FROM api_keys WHERE id = ? AND user_id = ?",
+            (key_id, current_user["id"])
+        ).fetchone()
+
+        if not key_record:
+            raise HTTPException(status_code=404, detail="API key not found")
+
+        conn.execute(
+            "UPDATE api_keys SET revoked_at = ? WHERE id = ?",
+            (datetime.utcnow(), key_id)
+        )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to revoke API key: {str(e)}")
+    finally:
+        conn.close()
+
+    return {"message": "API key revoked successfully"}
 
 
 @app.post("/report")
