@@ -18,6 +18,7 @@ import SignupPage from "./pages/Signup";
 import ProfilePage from "./pages/Profile";
 import FeaturesPage from "./pages/Features";
 import Predict from "./pages/Predict"; // small debug form we built
+import PredictMap from "./pages/PredictMap";
 
 const queryClient = new QueryClient();
 
@@ -133,10 +134,10 @@ export default function App() {
               path="/predict"
               element={
                 <RequireAuth>
-                  <ValuationPage />
+                  <PredictMap />
                 </RequireAuth>
               }
-            />   {/* fancy UI */}
+            />   {/* map-based predict UI */}
             <Route
               path="/debug-predict"
               element={

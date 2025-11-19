@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/components/ui/use-toast";
+import { API_BASE } from "@/api";
 
 const ProfilePage = () => {
   const user = (() => {
@@ -33,6 +34,9 @@ const ProfilePage = () => {
   const [prefs, setPrefs] = useState<{ newsletter: boolean; alerts: boolean }>({ newsletter: true, alerts: true });
   const [notifyFreq, setNotifyFreq] = useState<"daily" | "weekly" | "monthly">("weekly");
   const [savedProps, setSavedProps] = useState<Array<{ id: string; img?: string; price?: string; address?: string; details?: string }>>([]);
+  const [apiKeys, setApiKeys] = useState<Array<{ id: number; name: string; created_at: string; revoked_at?: string }>>([]);
+  const [newApiKeyName, setNewApiKeyName] = useState("");
+  const [generatingKey, setGeneratingKey] = useState(false);
 
   const initials = useMemo(() => {
     const n = (name && name !== "Anonymous" ? name : (user?.email?.split("@")[0] || "")).trim();
@@ -263,6 +267,109 @@ const ProfilePage = () => {
     } catch {}
   };
 
+  // API Key management functions
+  const fetchApiKeys = async () => {
+    try {
+      const token = localStorage.getItem("auth:token");
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE.replace(/\/$/, "")}/api-keys`, {
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setApiKeys(data.api_keys || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch API keys:", err);
+    }
+  };
+
+  const generateApiKey = async () => {
+    if (!newApiKeyName.trim()) {
+      toast({ title: "Error", description: "Please enter a name for the API key." });
+      return;
+    }
+
+    setGeneratingKey(true);
+    try {
+      const token = localStorage.getItem("auth:token");
+      if (!token) {
+        toast({ title: "Error", description: "Authentication required." });
+        return;
+      }
+
+      const res = await fetch(`${API_BASE.replace(/\/$/, "")}/api-keys`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({ name: newApiKeyName.trim() }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem("api_key", data.key); // Store the new key
+        toast({
+          title: "API Key Generated",
+          description: `Key: ${data.key.substring(0, 20)}... (copied to clipboard)`,
+        });
+        navigator.clipboard?.writeText(data.key);
+        setNewApiKeyName("");
+        fetchApiKeys();
+      } else {
+        const error = await res.text();
+        toast({ title: "Error", description: error });
+      }
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to generate API key." });
+    } finally {
+      setGeneratingKey(false);
+    }
+  };
+
+  const revokeApiKey = async (keyId: number) => {
+    if (!confirm("Are you sure you want to revoke this API key? This action cannot be undone.")) return;
+
+    try {
+      const token = localStorage.getItem("auth:token");
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE.replace(/\/$/, "")}/api-keys/${keyId}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+
+      if (res.ok) {
+        toast({ title: "Success", description: "API key revoked." });
+        fetchApiKeys();
+        // If the revoked key was stored, remove it
+        const storedKey = localStorage.getItem("api_key");
+        if (storedKey) {
+          // Check if the stored key matches any active key
+          const activeKeys = apiKeys.filter(k => !k.revoked_at && k.id !== keyId);
+          if (activeKeys.length === 0) {
+            localStorage.removeItem("api_key");
+          }
+        }
+      } else {
+        const error = await res.text();
+        toast({ title: "Error", description: error });
+      }
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to revoke API key." });
+    }
+  };
+
+  // Load API keys on mount
+  useEffect(() => {
+    if (user) {
+      fetchApiKeys();
+    }
+  }, [user]);
+
   if (!user) {
     window.location.href = "/login";
     return null;
@@ -430,6 +537,67 @@ const ProfilePage = () => {
                     </div>
                   </div>
                 </div>
+            </Card>
+
+            {/* API Keys */}
+            <Card className="glass p-8 mt-10">
+              <h2 className="text-xl font-semibold mb-4">API Keys</h2>
+              <p className="text-sm text-muted-foreground mb-6">
+                Generate API keys to access the valuation API programmatically. Keep your keys secure and revoke them if compromised.
+              </p>
+
+              {/* Generate new key */}
+              <div className="flex gap-3 mb-6">
+                <Input
+                  placeholder="Enter a name for your API key"
+                  value={newApiKeyName}
+                  onChange={(e) => setNewApiKeyName(e.target.value)}
+                  className="flex-1"
+                />
+                <Button
+                  onClick={generateApiKey}
+                  disabled={generatingKey || !newApiKeyName.trim()}
+                  className="btn-premium"
+                >
+                  {generatingKey ? "Generating..." : "Generate Key"}
+                </Button>
+              </div>
+
+              {/* List existing keys */}
+              <div className="space-y-3">
+                {apiKeys.length === 0 ? (
+                  <div className="rounded-xl border border-white/10 bg-white/5 p-8 text-center">
+                    <div className="font-medium mb-1">No API keys yet</div>
+                    <div className="text-sm text-muted-foreground">Generate your first API key to start using the valuation API.</div>
+                  </div>
+                ) : (
+                  apiKeys.map((key) => (
+                    <div key={key.id} className="rounded-xl border border-white/10 bg-white/5 p-4 flex items-center justify-between">
+                      <div>
+                        <div className="font-medium">{key.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          Created: {new Date(key.created_at).toLocaleDateString()}
+                          {key.revoked_at && ` • Revoked: ${new Date(key.revoked_at).toLocaleDateString()}`}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {key.revoked_at ? (
+                          <span className="text-xs text-red-400">Revoked</span>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => revokeApiKey(key.id)}
+                            className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+                          >
+                            Revoke
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </Card>
 
             {/* Recent Activity */}

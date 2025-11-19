@@ -11,7 +11,7 @@ import { CountryCode, formatCurrency, getSavedCountry, saveCountry, convertAndFo
 import { predictPropertyPrice, API_BASE } from "@/api";
 import { PropertyDetails } from "@/components/PropertyForm";
 
-export const ValuationResults = ({ input, stickyHeader = true }: { input?: PropertyDetails; stickyHeader?: boolean }) => {
+export const ValuationResults = ({ input, stickyHeader = true, initialCountry }: { input?: PropertyDetails; stickyHeader?: boolean; initialCountry?: CountryCode }) => {
   const [selectedTimeframe, setSelectedTimeframe] = useState("1year");
   const [country, setCountry] = useState<CountryCode>(getSavedCountry());
   const [projectionYears, setProjectionYears] = useState<10 | 15 | 20>(15);
@@ -23,7 +23,7 @@ export const ValuationResults = ({ input, stickyHeader = true }: { input?: Prope
     high: 0,
   }));
   // API valuation data
-  const [apiValuation, setApiValuation] = useState<{ price_usd: number; price_inr: number } | null>(null);
+  const [apiValuation, setApiValuation] = useState<{ price_usd: number; price_inr: number; source?: string } | null>(null);
   const [apiLoading, setApiLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
@@ -237,6 +237,29 @@ export const ValuationResults = ({ input, stickyHeader = true }: { input?: Prope
 
   useEffect(() => { saveCountry(country); }, [country]);
 
+  // If a parent passes an initialCountry (e.g., from a selected map marker), use it
+  useEffect(() => {
+    if (initialCountry) setCountry(initialCountry);
+  }, [initialCountry]);
+
+  const prettyPropertyType = (pt?: string) => {
+    if (!pt) return null;
+    const key = pt.toString().toLowerCase();
+    const map: Record<string, string> = {
+      'single-family': 'Single Family Home',
+      'single family': 'Single Family Home',
+      'condo': 'Condominium',
+      'condominium': 'Condominium',
+      'townhouse': 'Townhouse',
+      'duplex': 'Duplex',
+      'apartment': 'Apartment',
+      'mansion': 'Mansion',
+      'land': 'Land/Lot',
+      'land/lot': 'Land/Lot',
+    };
+    return map[key] ?? (pt.charAt(0).toUpperCase() + pt.slice(1));
+  };
+
   // Compute future price projection for 10–20 years
   const projection = useMemo(() => {
     const yearsAhead = projectionYears;
@@ -418,6 +441,8 @@ export const ValuationResults = ({ input, stickyHeader = true }: { input?: Prope
           })()}
         </Card>
         </div>
+        {/* Anchor for Predict (navbar) */}
+        <div id="predict" />
         {/* Header */}
         <div className="text-center mb-12">
           <h2 className="text-4xl md:text-5xl font-display font-bold text-foreground mb-6">
@@ -428,6 +453,7 @@ export const ValuationResults = ({ input, stickyHeader = true }: { input?: Prope
           </div>
         </div>
 
+        <div id="valuation" />
         {/* Main Valuation Card */}
         <Card className="glass p-8 mb-8 border-border/50 shadow-elegant">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -443,13 +469,12 @@ export const ValuationResults = ({ input, stickyHeader = true }: { input?: Prope
                   <MapPin className="h-4 w-4" />
                   <span>{valuationData.address}</span>
                 </div>
+                {input?.propertyType && (
+                  <div className="mb-2">
+                    <span className="inline-block px-3 py-1 rounded-full bg-muted/20 text-sm font-medium">{prettyPropertyType(input.propertyType)}</span>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-4 text-sm">
-                  {input?.propertyType ? (
-                    <div>
-                      <span className="text-muted-foreground">Property Type:</span>
-                      <span className="ml-2 font-medium text-foreground">{input.propertyType}</span>
-                    </div>
-                  ) : null}
                   <div>
                     <span className="text-muted-foreground">Square Feet:</span>
                     <span className="ml-2 font-medium text-foreground">{valuationData.sqft.toLocaleString()}</span>
@@ -481,22 +506,34 @@ export const ValuationResults = ({ input, stickyHeader = true }: { input?: Prope
                 {apiLoading ? (
                   <div className="text-lg text-muted-foreground">Loading valuation...</div>
                 ) : apiError ? (
-                  <div className="text-lg text-destructive">Error: {apiError}</div>
+                  <div className="text-center">
+                    <div className="text-lg text-destructive mb-2">Error: {apiError}</div>
+                    <div className="text-sm text-muted-foreground">
+                      Please try again or contact support if the issue persists.
+                    </div>
+                  </div>
                 ) : (
                   <>
                     <div className="text-5xl font-bold text-gradient bg-gradient-primary bg-clip-text text-transparent mb-2">
-                      {formatCurrency(displayValuation.current, country)}
+                      {(() => {
+                        // Show the original/unmultiplied valuation to the user.
+                        if (apiValuation && typeof apiValuation.price_usd === 'number') {
+                          return convertAndFormatUSD(apiValuation.price_usd, country);
+                        }
+                        // valuationData.currentValue when API is not present is already in native currency
+                        return formatCurrency(valuationData.currentValue, country);
+                      })()}
                     </div>
                     <div className="text-sm text-muted-foreground mb-4">
-                      Range: {formatCurrency(displayValuation.low, country)} - {formatCurrency(displayValuation.high, country)}
+                      {(() => {
+                        if (apiValuation && typeof apiValuation.price_usd === 'number') {
+                          return `Range: ${convertAndFormatUSD(valuationData.priceRange.low, country)} - ${convertAndFormatUSD(valuationData.priceRange.high, country)}`;
+                        }
+                        return `Range: ${formatCurrency(valuationData.priceRange.low, country)} - ${formatCurrency(valuationData.priceRange.high, country)}`;
+                      })()}
                     </div>
-                    <div className="flex items-center justify-center gap-2">
-                      <Badge variant="secondary" className="bg-success/10 text-success border-success/20">
-                        <Target className="h-3 w-3 mr-1" />
-                        {valuationData.confidenceScore}% Confidence
-                        {apiValuation ? " (AI Model)" : " (Estimated)"}
-                      </Badge>
-                    </div>
+                    {/* Confidence badge removed by request */}
+                    <div />
                   </>
                 )}
               </div>
@@ -564,7 +601,7 @@ export const ValuationResults = ({ input, stickyHeader = true }: { input?: Prope
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="rounded-xl border border-border/50 p-5 bg-muted/20">
                   <div className="text-sm text-muted-foreground mb-1">Average Property</div>
-                    <div className="text-2xl font-bold text-foreground">{formatCurrency(avgLow * getDisplayMultiplier(country), country)} - {formatCurrency(avgHigh * getDisplayMultiplier(country), country)}</div>
+                    <div className="text-2xl font-bold text-foreground">{formatCurrency(avgLow, country)} - {formatCurrency(avgHigh, country)}</div>
                   {guidanceNote ? (
                     <div className="text-xs text-muted-foreground mt-1">{guidanceNote}</div>
                   ) : ppsfAvg ? (
@@ -575,7 +612,7 @@ export const ValuationResults = ({ input, stickyHeader = true }: { input?: Prope
                 <div className="rounded-xl border border-border/50 p-5 bg-gradient-to-br from-secondary/10 to-primary/10">
                   <div className="text-sm text-secondary mb-1">Luxury Property</div>
                   <div className="text-2xl font-bold bg-gradient-to-r from-secondary via-primary to-secondary bg-clip-text text-transparent">
-                    {formatCurrency(luxLow * getDisplayMultiplier(country), country)} - {formatCurrency(luxHigh * getDisplayMultiplier(country), country)}
+                    {formatCurrency(luxLow, country)} - {formatCurrency(luxHigh, country)}
                   </div>
                   {ppsfLux && (
                     <div className="text-xs text-muted-foreground mt-1">~ {formatCurrency(Math.round(ppsfLux), country)}/sqft</div>
@@ -727,7 +764,7 @@ export const ValuationResults = ({ input, stickyHeader = true }: { input?: Prope
                     </div>
                   </div>
                   <div className="text-sm text-muted-foreground mt-1">
-                    Projected: {convertAndFormatUSD(data.price * getDisplayMultiplier(country), country)}
+                    Projected: {convertAndFormatUSD(data.price, country)}
                   </div>
                 </div>
               ))}

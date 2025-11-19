@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "@/components/ui/use-toast";
-import { Menu, X, Home, Calculator, TrendingUp, BarChart3, Phone } from "lucide-react";
+import { Menu, X, Home, Calculator, TrendingUp, BarChart3, Phone, Target } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import React from "react";
 import siteLogo from "@/assets/Estate Luxe at Golden Hour.png";
@@ -35,8 +35,8 @@ export const Navigation = () => {
 
   useEffect(() => {
     const onScroll = () => {
-      setScrolled(window.scrollY > 8);
-      const sections = ["#home", "#valuation", "#insights", "#calculator", "#contact"];
+        setScrolled(window.scrollY > 8);
+        const sections = ["#home", "#valuation", "#insights", "#calculator", "#contact"];
       for (const id of sections) {
         const el = document.querySelector(id) as HTMLElement | null;
         if (!el) continue;
@@ -73,7 +73,8 @@ export const Navigation = () => {
   const navItems = [
     { name: "Home", href: "/", icon: Home },
     { name: "Features", href: "/features", icon: Home },
-    { name: "Valuation", href: "#valuation", icon: Calculator },
+    { name: "Valuation", href: "/valuation", icon: Calculator },
+    { name: "Predict", href: "/predict", icon: Target },
     { name: "Market Insights", href: "#insights", icon: TrendingUp },
     { name: "Calculator", href: "#calculator", icon: BarChart3 },
     { name: "Contact", href: "#contact", icon: Phone },
@@ -109,17 +110,31 @@ export const Navigation = () => {
           <div className="hidden md:block">
             <div className="ml-10 flex items-baseline space-x-1 glass rounded-full px-2 py-1 border-border/50">
               {navItems.map((item) => {
-                const isActive = item.href === '/' ? active === '#home' : active === item.href;
+                const isHash = item.href && item.href.startsWith('#');
+                const isRoute = item.href && item.href.startsWith('/');
+                const isActive = item.href === '/'
+                  ? active === '#home' || (typeof window !== 'undefined' && window.location.pathname === '/')
+                  : isHash
+                  ? active === item.href
+                  : (typeof window !== 'undefined' && window.location.pathname === item.href);
+
                 return (
                   <a
                     key={item.name}
-                    href={item.href.replace('#', '/')}
+                    href={item.href}
                     className={`hover-ripple px-3 py-2 rounded-full text-sm font-medium transition-all duration-300 hover:bg-muted/60 ${isActive ? 'text-foreground bg-muted/60' : 'text-foreground/80 hover:text-foreground'}`}
                     onMouseMove={(e) => {
                       const target = e.currentTarget as HTMLElement;
                       const rect = target.getBoundingClientRect();
                       target.style.setProperty('--ripple-x', `${e.clientX - rect.left}px`);
                       target.style.setProperty('--ripple-y', `${e.clientY - rect.top}px`);
+                    }}
+                    onClick={(e) => {
+                      if (isHash) {
+                        e.preventDefault();
+                        scrollTo(item.href);
+                      }
+                      // for route links we let the browser/router handle navigation
                     }}
                   >
                     {item.name}
@@ -219,12 +234,16 @@ export const Navigation = () => {
                 )}
                 {navItems.map((item) => {
                   const Icon = item.icon;
+                  const isHash = item.href && item.href.startsWith('#');
                   return (
                     <a
                       key={item.name}
-                      href={item.href.replace('#', '/')}
+                      href={isHash ? item.href : item.href.replace('#', '/')}
                       className="text-foreground/80 hover:text-foreground flex items-center px-3 py-2 rounded-lg text-base font-medium transition-all duration-300 hover:bg-white/5 hover:ring-1 hover:ring-[#CBA13533] border border-white/5 mb-1"
-                      onClick={() => setIsOpen(false)}
+                      onClick={() => {
+                        setIsOpen(false);
+                        if (isHash) scrollTo(item.href);
+                      }}
                     >
                       <Icon className="h-5 w-5 mr-3 text-[#CBA135]" />
                       {item.name}
@@ -236,8 +255,8 @@ export const Navigation = () => {
                     className="btn-premium w-full rounded-lg"
                     onClick={() => {
                       setIsOpen(false);
-                      scrollTo("#valuation");
-                      toast({ title: "Let's get your valuation", description: "Scroll down to the form." });
+                      try { window.location.href = '/valuation'; } catch { /* fallback */ }
+                      toast({ title: "Let's get your valuation", description: "Opening the valuation page." });
                     }}
                   >
                     Get Started
